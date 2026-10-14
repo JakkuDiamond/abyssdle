@@ -45,12 +45,24 @@
             100% { transform: scale(1); }
         }
 
+        /* Shake animation for invalid words */
+        .row-shake { animation: shake 0.5s; }
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-2px, 0, 0); }
+            20%, 80% { transform: translate3d(4px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-6px, 0, 0); }
+            40%, 60% { transform: translate3d(6px, 0, 0); }
+        }
+
         /* Slide & Fade for Toasts */
         .toast-enter { animation: fade-in-up-toast 0.3s ease-out forwards; }
         @keyframes fade-in-up-toast {
             0% { opacity: 0; transform: translate(-50%, 10px); }
             100% { opacity: 1; transform: translate(-50%, 0); }
         }
+        
+        .spin-slow { animation: spin 3s linear infinite; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
 
         /* Prevent zooming on inputs on iOS */
         * { touch-action: manipulation; }
@@ -62,92 +74,109 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useCallback } = React;
 
-        // --- DATABASE ---
-        const POKEMON_DB = [
-            // Pokémon
-            { name: "BULBASAUR", category: "Pokémon", hints: ["Introduced in Generation 1", "Type: Grass / Poison"] },
-            { name: "CHARIZARD", category: "Pokémon", hints: ["Introduced in Generation 1", "Has two different Mega Evolutions"] },
-            { name: "PIKACHU", category: "Pokémon", hints: ["The mascot of the franchise", "Evolves with a Thunder Stone"] },
-            { name: "GENGAR", category: "Pokémon", hints: ["Introduced in Generation 1", "Type: Ghost / Poison"] },
-            { name: "SNORLAX", category: "Pokémon", hints: ["Introduced in Generation 1", "Known for blocking paths while sleeping"] },
-            { name: "MEWTWO", category: "Pokémon", hints: ["Generation 1 Legendary", "Created through genetic manipulation"] },
-            { name: "HO-OH", category: "Pokémon", hints: ["Generation 2 Box Legendary", "Resurrected the Legendary Beasts"] },
-            { name: "LUGIA", category: "Pokémon", hints: ["Generation 2 Box Legendary", "Known as the Guardian of the Seas"] },
-            { name: "CELEBI", category: "Pokémon", hints: ["Generation 2 Mythical", "Known for traveling through time"] },
-            { name: "RAYQUAZA", category: "Pokémon", hints: ["Generation 3 Box Legendary", "Stops the fighting between Groudon and Kyogre"] },
-            { name: "LUCARIO", category: "Pokémon", hints: ["Introduced in Generation 4", "Can sense and manipulate Aura"] },
-            { name: "GARCHOMP", category: "Pokémon", hints: ["Introduced in Generation 4", "Champion Cynthia's signature Pokémon"] },
-            { name: "ARCEUS", category: "Pokémon", hints: ["Generation 4 Mythical", "Said to have created the Pokémon universe"] },
-            { name: "ZOROARK", category: "Pokémon", hints: ["Introduced in Generation 5", "Has the unique ability 'Illusion'"] },
-            { name: "GRENINJA", category: "Pokémon", hints: ["Introduced in Generation 6", "Can transform with the 'Battle Bond' ability"] },
-            { name: "SYLVEON", category: "Pokémon", hints: ["Introduced in Generation 6", "An 'Eeveelution'"] },
-            { name: "ZYGARDE", category: "Pokémon", hints: ["Generation 6 Legendary", "Has 10%, 50%, and Complete forms"] },
-            { name: "MIMIKYU", category: "Pokémon", hints: ["Introduced in Generation 7", "Wears a handmade disguise to look like Pikachu"] },
-            { name: "TAPU-KOKO", category: "Pokémon", hints: ["Generation 7 Legendary", "Guardian deity of Melemele Island"] },
-            { name: "DRAGAPULT", category: "Pokémon", hints: ["Introduced in Generation 8", "Fires Dreepy from its horns like missiles"] },
-            { name: "MEOWSCARADA", category: "Pokémon", hints: ["Introduced in Generation 9", "Signature move: Flower Trick"] },
-            { name: "TINKATON", category: "Pokémon", hints: ["Introduced in Generation 9", "Swings a massive hammer made of Corviknight armor"] },
-            { name: "KORAIDON", category: "Pokémon", hints: ["Generation 9 Box Legendary", "Type: Fighting / Dragon"] },
-            { name: "MIRAIDON", category: "Pokémon", hints: ["Generation 9 Box Legendary", "Type: Electric / Dragon"] },
-            { name: "PORYGON-Z", category: "Pokémon", hints: ["Introduced in Generation 4", "Evolves when traded holding a Dubious Disc"] },
-            { name: "CHIEN-PAO", category: "Pokémon", hints: ["Generation 9 Legendary", "One of the four Treasures of Ruin"] },
-            { name: "OGERPON", category: "Pokémon", hints: ["Generation 9 (DLC) Legendary", "Wears different masks to change its typing"] },
-            { name: "TERAPAGOS", category: "Pokémon", hints: ["Generation 9 (DLC) Legendary", "Directly linked to the Terastal phenomenon"] },
-            { name: "XERNEAS", category: "Pokémon", hints: ["Generation 6 Box Legendary", "Has the signature 'Fairy Aura' ability"] },
-            { name: "YVELTAL", category: "Pokémon", hints: ["Generation 6 Box Legendary", "Known as the Destruction Pokémon"] },
+        // --- POKEAPI INTEGRATION ---
+        const CACHE_KEY = 'abyssdle_pokeapi_cache_v2';
+        const FALLBACK_DB = [{ name: "PIKACHU", category: "Pokémon", url: "https://pokeapi.co/api/v2/pokemon/pikachu" }];
+        
+        const loadPokeAPI = async () => {
+            const cached = localStorage.getItem(CACHE_KEY);
+            if (cached) {
+                const parsed = JSON.parse(cached);
+                // Cache valid for 7 days
+                if (Date.now() - parsed.timestamp < 7 * 24 * 60 * 60 * 1000) {
+                    return parsed.data;
+                }
+            }
 
-            // Moves
-            { name: "WILL-O-WISP", category: "Move", hints: ["Inflicts the Burn status condition", "Originally the signature move of Duskull's line"] },
-            { name: "THUNDERBOLT", category: "Move", hints: ["Has a 10% chance to Paralyze", "Base Power: 90"] },
-            { name: "EARTHQUAKE", category: "Move", hints: ["Hits all adjacent Pokémon on the field", "Base Power: 100"] },
-            { name: "FLAMETHROWER", category: "Move", hints: ["Has a 10% chance to Burn", "Base Power: 90"] },
-            { name: "ICE-BEAM", category: "Move", hints: ["Has a 10% chance to Freeze", "Base Power: 90"] },
-            { name: "U-TURN", category: "Move", hints: ["User switches out immediately after dealing damage", "Type: Bug"] },
-            { name: "V-CREATE", category: "Move", hints: ["Lowers user's Defense, Sp. Def, and Speed after use", "Signature move of Victini"] },
-            { name: "ROAR-OF-TIME", category: "Move", hints: ["User must recharge on the following turn", "Signature move of Dialga"] },
-            { name: "SHADOW-BALL", category: "Move", hints: ["20% chance to lower target's Sp. Def", "Type: Ghost"] },
-            { name: "HYPER-BEAM", category: "Move", hints: ["User must recharge on the following turn", "Type: Normal"] },
-            { name: "CLOSE-COMBAT", category: "Move", hints: ["Lowers user's Defense and Sp. Def after use", "Type: Fighting"] },
-            { name: "DRAGON-CLAW", category: "Move", hints: ["Type: Dragon", "Base Power: 80, has no secondary effects"] },
+            const endpoints = [
+                { cat: 'Pokémon', url: 'https://pokeapi.co/api/v2/pokemon-species?limit=1500' },
+                { cat: 'Move', url: 'https://pokeapi.co/api/v2/move?limit=1000' },
+                { cat: 'Item', url: 'https://pokeapi.co/api/v2/item?limit=2000' },
+                { cat: 'Ability', url: 'https://pokeapi.co/api/v2/ability?limit=500' }
+            ];
 
-            // Items
-            { name: "MASTER-BALL", category: "Item", hints: ["Catches any wild Pokémon without fail", "Developed by Silph Co."] },
-            { name: "ULTRA-BALL", category: "Item", hints: ["Has a 2x catch rate modifier", "Distinctive black and yellow design"] },
-            { name: "LEFTOVERS", category: "Item", hints: ["Restores 1/16 of max HP at the end of each turn", "Often found on wild Snorlax"] },
-            { name: "EXP-SHARE", category: "Item", hints: ["Distributes experience to the whole party in modern games", "Originally called 'Exp. All' in Generation 1"] },
-            { name: "FULL-RESTORE", category: "Item", hints: ["Heals all HP and cures all status conditions", "Often spammed by the Elite Four"] },
-            { name: "POTION", category: "Item", hints: ["Restores exactly 20 HP", "The most basic healing item"] },
-            { name: "MAX-REPEL", category: "Item", hints: ["Prevents wild encounters for 250 steps", "More step-efficient than a Super Repel"] },
-            { name: "LUCKY-EGG", category: "Item", hints: ["Boosts EXP gained in battle by 50%", "Often held by wild Chansey"] },
-            { name: "RARE-CANDY", category: "Item", hints: ["Instantly raises a Pokémon's level by 1", "Found scattered across every region"] },
-            { name: "CHOICE-SCARF", category: "Item", hints: ["Boosts Speed by 50%", "Locks the user into the first move selected"] },
-            { name: "MEGA-RING", category: "Item", hints: ["Key item introduced in Generation 6", "Allows compatible Pokémon to Mega Evolve"] },
-            { name: "TERA-ORB", category: "Item", hints: ["Key item introduced in Generation 9", "Allows a Pokémon to Terastallize"] },
+            try {
+                let combined = [];
+                for (const ep of endpoints) {
+                    const res = await fetch(ep.url);
+                    const data = await res.json();
+                    
+                    // Filter: Only letters and hyphens, length between 3 and 12 chars (to fit grid)
+                    const filtered = data.results.filter(r => /^[a-z\-]+$/.test(r.name) && r.name.length >= 3 && r.name.length <= 12);
+                    
+                    combined.push(...filtered.map(item => ({
+                        name: item.name.toUpperCase(),
+                        category: ep.cat,
+                        url: item.url
+                    })));
+                }
+                
+                // Sort deterministically to ensure the daily index targets the same item for everyone
+                combined.sort((a, b) => a.name.localeCompare(b.name));
+                
+                localStorage.setItem(CACHE_KEY, JSON.stringify({
+                    timestamp: Date.now(),
+                    data: combined
+                }));
+                
+                return combined;
+            } catch (err) {
+                console.error("Failed to load from PokeAPI", err);
+                return FALLBACK_DB; // Fallback to avoid crashing
+            }
+        };
 
-            // Abilities
-            { name: "INTIMIDATE", category: "Ability", hints: ["Lowers opponents' Attack stat upon entering battle", "Common on Gyarados, Arcanine, and Salamence"] },
-            { name: "LEVITATE", category: "Ability", hints: ["Grants immunity to Ground-type moves", "Gengar used to have this, but lost it in Gen 7"] },
-            { name: "STURDY", category: "Ability", hints: ["Prevents OHKO moves from working", "Functions like a Focus Sash when at full HP"] },
-            { name: "STATIC", category: "Ability", hints: ["30% chance to paralyze the attacker on contact", "Pikachu's primary ability"] },
-            { name: "SYNCHRONIZE", category: "Ability", hints: ["Passes Burn, Poison, or Paralysis to the attacker", "Useful in the overworld for finding wild Pokémon of the same Nature"] },
-            { name: "SPEED-BOOST", category: "Ability", hints: ["Raises Speed by 1 stage at the end of each turn", "Hidden ability of Torchic's evolutionary line"] },
-            { name: "MULTI-SCALE", category: "Ability", hints: ["Halves damage taken when at full HP", "Dragonite's Hidden Ability"] },
-            { name: "TOUGH-CLAWS", category: "Ability", hints: ["Boosts the power of contact moves by 30%", "Mega Charizard X has this ability"] },
-            { name: "HUGE-POWER", category: "Ability", hints: ["Doubles the Pokémon's physical Attack stat", "Azumarill and Diggersby are famous for using this"] },
-            { name: "BEAST-BOOST", category: "Ability", hints: ["Raises highest stat after knocking out a Pokémon", "Signature ability of the Ultra Beasts"] },
-            { name: "PROTEAN", category: "Ability", hints: ["Changes the user's type to match the move used", "Greninja's Hidden Ability"] },
-            { name: "LIBERO", category: "Ability", hints: ["Changes the user's type to match the move used", "Cinderace's Hidden Ability"] }
-        ];
+        const fetchHints = async (targetMeta) => {
+            try {
+                const res = await fetch(targetMeta.url);
+                const data = await res.json();
+                let hints = [];
+
+                const getEnglishFlavor = (entries) => {
+                    if (!entries) return null;
+                    const entry = entries.find(f => f.language.name === 'en');
+                    return entry ? entry.flavor_text.replace(/[\n\f\r]/g, ' ').replace(/\s+/g, ' ') : null;
+                };
+
+                if (targetMeta.category === 'Pokémon') {
+                    const gen = data.generation?.name.toUpperCase().replace('-', ' ') || "UNKNOWN GEN";
+                    hints.push(`Introduced in: ${gen}`);
+                    const flavor = getEnglishFlavor(data.flavor_text_entries);
+                    hints.push(flavor || `Color: ${data.color?.name || 'Unknown'}`);
+                } 
+                else if (targetMeta.category === 'Move') {
+                    hints.push(`Type: ${data.type?.name.toUpperCase() || 'UNKNOWN'} | Class: ${data.damage_class?.name.toUpperCase() || 'UNKNOWN'}`);
+                    const flavor = getEnglishFlavor(data.flavor_text_entries);
+                    hints.push(flavor || `PP: ${data.pp} | Power: ${data.power || 'N/A'}`);
+                } 
+                else if (targetMeta.category === 'Item') {
+                    hints.push(`Category: ${data.category?.name.toUpperCase().replace('-', ' ') || 'UNKNOWN'}`);
+                    const effect = data.effect_entries?.find(e => e.language.name === 'en')?.short_effect;
+                    const flavor = getEnglishFlavor(data.flavor_text_entries);
+                    hints.push(effect || flavor || `Cost: ${data.cost || 'N/A'}`);
+                } 
+                else if (targetMeta.category === 'Ability') {
+                    const gen = data.generation?.name.toUpperCase().replace('-', ' ') || "UNKNOWN GEN";
+                    hints.push(`Introduced in: ${gen}`);
+                    const effect = data.effect_entries?.find(e => e.language.name === 'en')?.short_effect;
+                    const flavor = getEnglishFlavor(data.flavor_text_entries);
+                    hints.push(effect || flavor || "A special ability.");
+                }
+
+                return hints;
+            } catch (e) {
+                console.error(e);
+                return ["Data corrupted in the Abyss.", "No further hints available."];
+            }
+        };
 
         // --- UTILS ---
         const CAT_ICONS = { "Pokémon": "🐾", "Move": "⚔️", "Item": "🎒", "Ability": "✨" };
         const MAX_GUESSES = 6;
 
         const getDailyTargetIndex = () => {
-            // SET EPOCH TO TODAY (Oct 14, 2026) so index starts at 0 today
             const epoch = new Date("2026-10-14T00:00:00").getTime();
             const today = new Date().setHours(0,0,0,0);
-            // Protect against timezone negatives if someone is exactly on the line
             const diff = Math.floor((today - epoch) / 86400000);
             return diff >= 0 ? diff : 0; 
         };
@@ -235,9 +264,12 @@
         };
 
         // Game Grid Row
-        const Row = ({ targetLength, guessLetters, isEvaluated, isAnimating, statuses }) => {
+        const Row = ({ targetLength, guessLetters, isEvaluated, isAnimating, isShaking, statuses }) => {
+            let rowClasses = "grid gap-1 sm:gap-2 w-full max-w-2xl mx-auto";
+            if (isShaking) rowClasses += " row-shake";
+
             return (
-                <div className="grid gap-1 sm:gap-2 w-full" style={{ gridTemplateColumns: `repeat(${targetLength}, minmax(0, 1fr))` }}>
+                <div className={rowClasses} style={{ gridTemplateColumns: `repeat(${targetLength}, minmax(0, 1fr))` }}>
                     {Array.from({ length: targetLength }).map((_, i) => {
                         const val = guessLetters[i] || '';
                         const status = isEvaluated ? statuses[i] : null;
@@ -257,7 +289,7 @@
             ];
 
             return (
-                <div className="w-full max-w-lg mx-auto flex flex-col gap-2 p-2 mt-4 sm:mt-8">
+                <div className="w-full max-w-2xl mx-auto flex flex-col gap-2 p-2 mt-4 sm:mt-8">
                     {rows.map((row, i) => (
                         <div key={i} className="flex justify-center gap-1 sm:gap-2 w-full">
                             {row.map(key => {
@@ -287,16 +319,17 @@
         };
 
         // Main Game Container
-        const Game = ({ mode, target, onModeSwitch }) => {
+        const Game = ({ mode, target, dictionary, onModeSwitch }) => {
             const [guesses, setGuesses] = useState([]);
             const [currentGuess, setCurrentGuess] = useState('');
-            const [gameStatus, setGameStatus] = useState('playing'); // playing, won, lost
+            const [gameStatus, setGameStatus] = useState('playing'); 
             const [animatingRow, setAnimatingRow] = useState(-1);
             const [revealedRows, setRevealedRows] = useState(0);
+            const [shakeRow, setShakeRow] = useState(-1);
             
             const [showStats, setShowStats] = useState(false);
             const [showHintModal, setShowHintModal] = useState(false);
-            const [hintsRevealed, setHintsRevealed] = useState(0); // 0, 1, or 2
+            const [hintsRevealed, setHintsRevealed] = useState(0); 
             const [toast, setToast] = useState('');
 
             const targetLength = target.name.length;
@@ -332,6 +365,11 @@
                 setTimeout(() => setToast(''), time);
             };
 
+            const triggerShake = () => {
+                setShakeRow(guesses.length);
+                setTimeout(() => setShakeRow(-1), 500);
+            };
+
             const handleChar = useCallback((char) => {
                 if (gameStatus !== 'playing' || animatingRow !== -1) return;
                 if (currentGuess.length < targetLength) setCurrentGuess(prev => prev + char);
@@ -344,17 +382,28 @@
 
             const handleEnter = useCallback(() => {
                 if (gameStatus !== 'playing' || animatingRow !== -1) return;
+                
+                // 1. Validate Length
                 if (currentGuess.length !== targetLength) {
                     showMessage("Not enough letters");
+                    triggerShake();
                     return;
                 }
 
+                // 2. Validate Word against Dictionary dynamically fetched from PokeAPI
+                if (!dictionary.has(currentGuess)) {
+                    showMessage("Not in PokeAPI database");
+                    triggerShake();
+                    return;
+                }
+
+                // If valid, submit the guess
                 const newGuesses = [...guesses, currentGuess];
                 setGuesses(newGuesses);
                 setCurrentGuess('');
                 setAnimatingRow(newGuesses.length - 1);
 
-                // Wait for animation to finish before updating game status & keyboard
+                // Wait for animation to finish
                 const animDuration = (targetLength * 150) + 600;
                 setTimeout(() => {
                     setRevealedRows(newGuesses.length);
@@ -368,12 +417,12 @@
                         setTimeout(() => setShowStats(true), 2000);
                     } else if (newGuesses.length === MAX_GUESSES) {
                         setGameStatus('lost');
-                        showMessage(`It was ${target.name}`, null); // Persistent
+                        showMessage(`It was ${target.name}`, null); 
                         updateStats(false);
                         setTimeout(() => setShowStats(true), 2000);
                     }
                 }, animDuration);
-            }, [currentGuess, targetLength, guesses, gameStatus, animatingRow, target.name]);
+            }, [currentGuess, targetLength, guesses, gameStatus, animatingRow, target.name, dictionary]);
 
             // Global Keyboard Listener
             useEffect(() => {
@@ -419,7 +468,6 @@
             };
 
             const shareResult = () => {
-                // Get today's index and add 1 so index 0 shows as "Daily 1"
                 const displayDay = getDailyTargetIndex() + 1;
                 const title = mode === 'daily' ? `Abyssdle Daily ${displayDay}` : 'Abyssdle Unlimited';
                 const attempt = gameStatus === 'won' ? guesses.length : 'X';
@@ -440,7 +488,7 @@
             const statsData = JSON.parse(localStorage.getItem('abyssdleStats')) || { played: 0, wins: 0, currentStreak: 0, maxStreak: 0, dist: Array(6).fill(0) };
 
             return (
-                <div className="flex flex-col min-h-screen pt-4 pb-8">
+                <div className="flex flex-col min-h-screen pt-4 pb-8 w-full max-w-4xl mx-auto">
                     <Toast message={toast} />
 
                     {/* Header */}
@@ -467,11 +515,12 @@
 
                     {/* Game Grid */}
                     <main className="flex-1 flex flex-col items-center justify-start w-full px-4 pt-2">
-                        <div className="w-full max-w-md flex flex-col gap-1 sm:gap-2">
+                        <div className="w-full flex flex-col gap-1 sm:gap-2">
                             {Array.from({ length: MAX_GUESSES }).map((_, i) => {
                                 const isCurrent = i === guesses.length;
                                 const isEvaluated = i < revealedRows;
                                 const isAnimating = i === animatingRow;
+                                const isShaking = i === shakeRow;
                                 const guessLetters = isCurrent ? currentGuess : (guesses[i] || '');
                                 const statuses = (isEvaluated || isAnimating) ? evaluateGuess(guesses[i], target.name) : null;
 
@@ -482,6 +531,7 @@
                                         guessLetters={guessLetters}
                                         isEvaluated={isEvaluated || isAnimating}
                                         isAnimating={isAnimating}
+                                        isShaking={isShaking}
                                         statuses={statuses}
                                     />
                                 );
@@ -555,19 +605,46 @@
             );
         };
 
-        // App Wrapper - Manages Mode State
+        // App Wrapper - Manages Loading & DB state
         const App = () => {
-            const [mode, setMode] = useState('daily'); // 'daily' | 'unlimited'
-            const [key, setKey] = useState(0); // Force remount Game component on unlimited retry
-            
-            const target = useMemo(() => {
-                if (mode === 'daily') {
-                    return POKEMON_DB[getDailyTargetIndex() % POKEMON_DB.length];
-                } else {
-                    return POKEMON_DB[Math.floor(Math.random() * POKEMON_DB.length)];
-                }
-                // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, [mode, key]);
+            const [db, setDb] = useState(null);
+            const [dictionary, setDictionary] = useState(null);
+            const [target, setTarget] = useState(null);
+            const [mode, setMode] = useState('daily'); 
+            const [key, setKey] = useState(0); 
+            const [loadingMsg, setLoadingMsg] = useState('Connecting to PokeAPI...');
+
+            // 1. Fetch DB on mount
+            useEffect(() => {
+                const initDB = async () => {
+                    const loadedDb = await loadPokeAPI();
+                    setDb(loadedDb);
+                    setDictionary(new Set(loadedDb.map(i => i.name)));
+                };
+                initDB();
+            }, []);
+
+            // 2. Setup Target when DB or Mode changes
+            useEffect(() => {
+                if (!db) return;
+                
+                const setupTarget = async () => {
+                    setTarget(null); // Triggers loading UI
+                    setLoadingMsg('Extracting target data from PokeAPI...');
+                    
+                    let selectedMeta;
+                    if (mode === 'daily') {
+                        selectedMeta = db[getDailyTargetIndex() % db.length];
+                    } else {
+                        selectedMeta = db[Math.floor(Math.random() * db.length)];
+                    }
+                    
+                    // Fetch dynamic hints from PokeAPI
+                    const hints = await fetchHints(selectedMeta);
+                    setTarget({ ...selectedMeta, hints });
+                };
+                setupTarget();
+            }, [db, mode, key]);
 
             const handleModeSwitch = (newMode) => {
                 if (newMode === 'unlimited_force') {
@@ -579,7 +656,18 @@
                 }
             };
 
-            return <Game key={`${mode}-${key}`} mode={mode} target={target} onModeSwitch={handleModeSwitch} />;
+            // Loading State UI
+            if (!target) {
+                return (
+                    <div className="flex flex-col items-center justify-center min-h-screen text-center px-4">
+                        <RelicCrown className="w-16 h-16 text-amber-400 mb-6 spin-slow opacity-80" />
+                        <h2 className="text-2xl font-bold text-white mb-2 tracking-widest uppercase">Abyssdle</h2>
+                        <p className="text-cyan-400 animate-pulse">{loadingMsg}</p>
+                    </div>
+                );
+            }
+
+            return <Game key={`${mode}-${key}`} mode={mode} target={target} dictionary={dictionary} onModeSwitch={handleModeSwitch} />;
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
