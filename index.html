@@ -75,7 +75,7 @@
         const { useState, useEffect, useMemo, useCallback } = React;
 
         // --- POKEAPI INTEGRATION ---
-        const CACHE_KEY = 'abyssdle_pokeapi_cache_v2';
+        const CACHE_KEY = 'abyssdle_pokeapi_cache_v4'; // Updated key to force fresh download
         const FALLBACK_DB = [{ name: "PIKACHU", category: "Pokémon", url: "https://pokeapi.co/api/v2/pokemon/pikachu" }];
         
         const loadPokeAPI = async () => {
@@ -101,7 +101,7 @@
                     const res = await fetch(ep.url);
                     const data = await res.json();
                     
-                    // Filter: Only letters and hyphens, length between 3 and 12 chars (to fit grid)
+                    // Filter: Only letters and hyphens, length between 3 and 12 chars
                     const filtered = data.results.filter(r => /^[a-z\-]+$/.test(r.name) && r.name.length >= 3 && r.name.length <= 12);
                     
                     combined.push(...filtered.map(item => ({
@@ -114,10 +114,13 @@
                 // Sort deterministically to ensure the daily index targets the same item for everyone
                 combined.sort((a, b) => a.name.localeCompare(b.name));
                 
-                localStorage.setItem(CACHE_KEY, JSON.stringify({
-                    timestamp: Date.now(),
-                    data: combined
-                }));
+                // Extra safety: Only cache if we actually got a lot of data
+                if (combined.length > 1000) {
+                    localStorage.setItem(CACHE_KEY, JSON.stringify({
+                        timestamp: Date.now(),
+                        data: combined
+                    }));
+                }
                 
                 return combined;
             } catch (err) {
@@ -138,26 +141,29 @@
                     return entry ? entry.flavor_text.replace(/[\n\f\r]/g, ' ').replace(/\s+/g, ' ') : null;
                 };
 
+                // SAFE object unwrap utility to prevent "Cannot read property of undefined" crashes
+                const getSafeProp = (obj, defaultText = "UNKNOWN") => {
+                    return (obj?.name || defaultText).toUpperCase().replace(/-/g, ' ');
+                };
+
                 if (targetMeta.category === 'Pokémon') {
-                    const gen = data.generation?.name.toUpperCase().replace('-', ' ') || "UNKNOWN GEN";
-                    hints.push(`Introduced in: ${gen}`);
+                    hints.push(`Introduced in: ${getSafeProp(data.generation, 'UNKNOWN GEN')}`);
                     const flavor = getEnglishFlavor(data.flavor_text_entries);
-                    hints.push(flavor || `Color: ${data.color?.name || 'Unknown'}`);
+                    hints.push(flavor || `Color: ${getSafeProp(data.color, 'Unknown')}`);
                 } 
                 else if (targetMeta.category === 'Move') {
-                    hints.push(`Type: ${data.type?.name.toUpperCase() || 'UNKNOWN'} | Class: ${data.damage_class?.name.toUpperCase() || 'UNKNOWN'}`);
+                    hints.push(`Type: ${getSafeProp(data.type)} | Class: ${getSafeProp(data.damage_class)}`);
                     const flavor = getEnglishFlavor(data.flavor_text_entries);
-                    hints.push(flavor || `PP: ${data.pp} | Power: ${data.power || 'N/A'}`);
+                    hints.push(flavor || `PP: ${data.pp || 'N/A'} | Power: ${data.power || 'N/A'}`);
                 } 
                 else if (targetMeta.category === 'Item') {
-                    hints.push(`Category: ${data.category?.name.toUpperCase().replace('-', ' ') || 'UNKNOWN'}`);
+                    hints.push(`Category: ${getSafeProp(data.category)}`);
                     const effect = data.effect_entries?.find(e => e.language.name === 'en')?.short_effect;
                     const flavor = getEnglishFlavor(data.flavor_text_entries);
                     hints.push(effect || flavor || `Cost: ${data.cost || 'N/A'}`);
                 } 
                 else if (targetMeta.category === 'Ability') {
-                    const gen = data.generation?.name.toUpperCase().replace('-', ' ') || "UNKNOWN GEN";
-                    hints.push(`Introduced in: ${gen}`);
+                    hints.push(`Introduced in: ${getSafeProp(data.generation, 'UNKNOWN GEN')}`);
                     const effect = data.effect_entries?.find(e => e.language.name === 'en')?.short_effect;
                     const flavor = getEnglishFlavor(data.flavor_text_entries);
                     hints.push(effect || flavor || "A special ability.");
@@ -186,14 +192,12 @@
             const target = targetLetters.split('');
             const statuses = Array(guess.length).fill('absent');
 
-            // Find Correct (Green)
             for (let i = 0; i < guess.length; i++) {
                 if (guess[i] === target[i]) {
                     statuses[i] = 'correct';
                     target[i] = null;
                 }
             }
-            // Find Present (Yellow)
             for (let i = 0; i < guess.length; i++) {
                 if (statuses[i] !== 'correct' && target.includes(guess[i])) {
                     statuses[i] = 'present';
@@ -329,15 +333,16 @@
             
             const [showStats, setShowStats] = useState(false);
             const [showHintModal, setShowHintModal] = useState(false);
+            const [showInfoModal, setShowInfoModal] = useState(false);
             const [hintsRevealed, setHintsRevealed] = useState(0); 
             const [toast, setToast] = useState('');
 
             const targetLength = target.name.length;
 
-            // Load saved state (Only for Daily Mode)
+            // Load saved state
             useEffect(() => {
                 if (mode === 'daily') {
-                    const saved = JSON.parse(localStorage.getItem('abyssdleDaily')) || {};
+                    const saved = JSON.parse(localStorage.getItem('abyssdleDaily_v2')) || {};
                     if (saved.dayIndex === getDailyTargetIndex() && saved.guesses) {
                         setGuesses(saved.guesses);
                         setRevealedRows(saved.guesses.length);
@@ -351,7 +356,7 @@
             // Save state
             useEffect(() => {
                 if (mode === 'daily' && guesses.length > 0 && animatingRow === -1) {
-                    localStorage.setItem('abyssdleDaily', JSON.stringify({
+                    localStorage.setItem('abyssdleDaily_v2', JSON.stringify({
                         dayIndex: getDailyTargetIndex(),
                         guesses,
                         gameStatus,
@@ -390,7 +395,7 @@
                     return;
                 }
 
-                // 2. Validate Word against Dictionary dynamically fetched from PokeAPI
+                // 2. Validate Word against Dictionary
                 if (!dictionary.has(currentGuess)) {
                     showMessage("Not in PokeAPI database");
                     triggerShake();
@@ -451,7 +456,6 @@
                 return statuses;
             }, [guesses, revealedRows, target.name]);
 
-            // Stats Logic
             const updateStats = (won, numGuesses) => {
                 if (mode !== 'daily') return;
                 const stats = JSON.parse(localStorage.getItem('abyssdleStats')) || { played: 0, wins: 0, currentStreak: 0, maxStreak: 0, dist: Array(6).fill(0) };
@@ -504,12 +508,20 @@
                             <button onClick={() => setShowHintModal(true)} className="px-3 py-1.5 rounded-full bg-slate-800 text-amber-400 hover:text-amber-300 hover:bg-slate-700 transition flex items-center gap-1 border border-slate-700">
                                 💡 Hints
                             </button>
+                            <button onClick={() => setShowInfoModal(true)} className="px-3 py-1.5 rounded-full bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 transition flex items-center gap-1 border border-slate-700">
+                                ℹ️ Help
+                            </button>
                             <button onClick={() => setShowStats(true)} className="p-1.5 text-slate-400 hover:text-white bg-slate-800 rounded-full border border-slate-700 hover:bg-slate-700 transition">📊</button>
                         </div>
                         
-                        <div className="mt-5 inline-flex items-center gap-2 px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg shadow">
-                            <span className="text-slate-400">Target Category:</span>
-                            <span className="font-bold text-cyan-400">{CAT_ICONS[target.category]} {target.category}</span>
+                        <div className="mt-5 flex flex-col items-center text-center px-4 py-2 bg-slate-800 border border-slate-700 rounded-lg shadow min-w-[200px]">
+                            <div>
+                                <span className="text-slate-400 mr-2">Target Category:</span>
+                                <span className="font-bold text-cyan-400">{CAT_ICONS[target.category]} {target.category}</span>
+                            </div>
+                            <span className="text-xs font-semibold text-amber-400/80 mt-1 block">
+                                * Remember: Spaces are typed as hyphens (-)
+                            </span>
                         </div>
                     </header>
 
@@ -568,6 +580,22 @@
                                         Reveal Hint 2
                                     </button>
                                 )}
+                            </div>
+                        </div>
+                    </Modal>
+
+                    {/* Info/Help Modal */}
+                    <Modal isOpen={showInfoModal} onClose={() => setShowInfoModal(false)} title="ℹ️ How to Play">
+                        <div className="flex flex-col gap-3 text-slate-300 text-sm sm:text-base">
+                            <p>Guess the hidden <strong>Pokémon, Move, Item, or Ability</strong> in 6 tries.</p>
+                            
+                            <div className="p-3 bg-slate-900 rounded border border-amber-500/50 mt-2">
+                                <h3 className="font-bold text-amber-400 mb-2">⚠️ IMPORTANT RULES:</h3>
+                                <ul className="list-disc pl-5 space-y-2">
+                                    <li><strong>Spaces are Hyphens:</strong> The PokeAPI dictionary uses hyphens for all compound words. To guess <span className="text-white font-bold">Master Ball</span>, you MUST type <span className="text-white font-bold">MASTER-BALL</span>.</li>
+                                    <li><strong>Base Species Only:</strong> Use base names for Pokémon, not specific forms (e.g. use <span className="text-white font-bold">ABOMASNOW</span>, not <span className="text-white font-bold">ABOMASNOW-MEGA</span>).</li>
+                                    <li><strong>No Numbers:</strong> Names containing numbers (like Porygon2 or TM01) are excluded from the game entirely.</li>
+                                </ul>
                             </div>
                         </div>
                     </Modal>
