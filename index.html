@@ -75,7 +75,7 @@
         const { useState, useEffect, useMemo, useCallback } = React;
 
         // --- POKEAPI INTEGRATION ---
-        const CACHE_KEY = 'abyssdle_pokeapi_cache_v4'; // Updated key to force fresh download
+        const CACHE_KEY = 'abyssdle_pokeapi_cache_v5'; // Bumped to v5 to force cache refresh
         const FALLBACK_DB = [{ name: "PIKACHU", category: "Pokémon", url: "https://pokeapi.co/api/v2/pokemon/pikachu" }];
         
         const loadPokeAPI = async () => {
@@ -135,13 +135,15 @@
                 const data = await res.json();
                 let hints = [];
 
+                // 100% Crash-proof flavor text extractor
                 const getEnglishFlavor = (entries) => {
-                    if (!entries) return null;
-                    const entry = entries.find(f => f.language.name === 'en');
-                    return entry ? entry.flavor_text.replace(/[\n\f\r]/g, ' ').replace(/\s+/g, ' ') : null;
+                    if (!entries || !Array.isArray(entries)) return null;
+                    // Note the strict optional chaining below `f?.language?.name` to avoid crashes
+                    const entry = entries.find(f => f?.language?.name === 'en');
+                    return entry ? (entry.flavor_text || "").replace(/[\n\f\r]/g, ' ').replace(/\s+/g, ' ') : null;
                 };
 
-                // SAFE object unwrap utility to prevent "Cannot read property of undefined" crashes
+                // SAFE object unwrap utility
                 const getSafeProp = (obj, defaultText = "UNKNOWN") => {
                     return (obj?.name || defaultText).toUpperCase().replace(/-/g, ' ');
                 };
@@ -158,21 +160,30 @@
                 } 
                 else if (targetMeta.category === 'Item') {
                     hints.push(`Category: ${getSafeProp(data.category)}`);
-                    const effect = data.effect_entries?.find(e => e.language.name === 'en')?.short_effect;
+                    // Crash-proof effect extractor
+                    let effect = null;
+                    if (data.effect_entries && Array.isArray(data.effect_entries)) {
+                        const entry = data.effect_entries.find(e => e?.language?.name === 'en');
+                        effect = entry?.short_effect;
+                    }
                     const flavor = getEnglishFlavor(data.flavor_text_entries);
                     hints.push(effect || flavor || `Cost: ${data.cost || 'N/A'}`);
                 } 
                 else if (targetMeta.category === 'Ability') {
                     hints.push(`Introduced in: ${getSafeProp(data.generation, 'UNKNOWN GEN')}`);
-                    const effect = data.effect_entries?.find(e => e.language.name === 'en')?.short_effect;
+                    let effect = null;
+                    if (data.effect_entries && Array.isArray(data.effect_entries)) {
+                        const entry = data.effect_entries.find(e => e?.language?.name === 'en');
+                        effect = entry?.short_effect;
+                    }
                     const flavor = getEnglishFlavor(data.flavor_text_entries);
                     hints.push(effect || flavor || "A special ability.");
                 }
 
                 return hints;
             } catch (e) {
-                console.error(e);
-                return ["Data corrupted in the Abyss.", "No further hints available."];
+                console.error("Hint generation failed:", e);
+                return ["Target data has no standard hints.", "Try to guess based on the category!"];
             }
         };
 
