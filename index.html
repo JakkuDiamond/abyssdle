@@ -144,9 +144,12 @@
         const MAX_GUESSES = 6;
 
         const getDailyTargetIndex = () => {
-            const epoch = new Date("2024-01-01T00:00:00").getTime();
+            // SET EPOCH TO TODAY (Oct 14, 2026) so index starts at 0 today
+            const epoch = new Date("2026-10-14T00:00:00").getTime();
             const today = new Date().setHours(0,0,0,0);
-            return Math.floor((today - epoch) / 86400000);
+            // Protect against timezone negatives if someone is exactly on the line
+            const diff = Math.floor((today - epoch) / 86400000);
+            return diff >= 0 ? diff : 0; 
         };
 
         const evaluateGuess = (guessLetters, targetLetters) => {
@@ -416,8 +419,11 @@
             };
 
             const shareResult = () => {
-                const title = mode === 'daily' ? `Abyssdle Daily ${getDailyTargetIndex()}` : 'Abyssdle Unlimited';
+                // Get today's index and add 1 so index 0 shows as "Daily 1"
+                const displayDay = getDailyTargetIndex() + 1;
+                const title = mode === 'daily' ? `Abyssdle Daily ${displayDay}` : 'Abyssdle Unlimited';
                 const attempt = gameStatus === 'won' ? guesses.length : 'X';
+                
                 let grid = guesses.map(g => {
                     const s = evaluateGuess(g, target.name);
                     return s.map(status => {
