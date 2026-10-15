@@ -75,7 +75,7 @@
         const { useState, useEffect, useMemo, useCallback } = React;
 
         // --- POKEAPI INTEGRATION ---
-        const CACHE_KEY = 'abyssdle_pokeapi_cache_v5'; // Bumped to v5 to force cache refresh
+        const CACHE_KEY = 'abyssdle_pokeapi_cache_v5'; 
         const FALLBACK_DB = [{ name: "PIKACHU", category: "Pokémon", url: "https://pokeapi.co/api/v2/pokemon/pikachu" }];
         
         const loadPokeAPI = async () => {
@@ -138,7 +138,6 @@
                 // 100% Crash-proof flavor text extractor
                 const getEnglishFlavor = (entries) => {
                     if (!entries || !Array.isArray(entries)) return null;
-                    // Note the strict optional chaining below `f?.language?.name` to avoid crashes
                     const entry = entries.find(f => f?.language?.name === 'en');
                     return entry ? (entry.flavor_text || "").replace(/[\n\f\r]/g, ' ').replace(/\s+/g, ' ') : null;
                 };
@@ -160,7 +159,6 @@
                 } 
                 else if (targetMeta.category === 'Item') {
                     hints.push(`Category: ${getSafeProp(data.category)}`);
-                    // Crash-proof effect extractor
                     let effect = null;
                     if (data.effect_entries && Array.isArray(data.effect_entries)) {
                         const entry = data.effect_entries.find(e => e?.language?.name === 'en');
@@ -350,10 +348,10 @@
 
             const targetLength = target.name.length;
 
-            // Load saved state
+            // Load saved state (Bumped to v3 to reset grids due to new random algorithm!)
             useEffect(() => {
                 if (mode === 'daily') {
-                    const saved = JSON.parse(localStorage.getItem('abyssdleDaily_v2')) || {};
+                    const saved = JSON.parse(localStorage.getItem('abyssdleDaily_v3')) || {};
                     if (saved.dayIndex === getDailyTargetIndex() && saved.guesses) {
                         setGuesses(saved.guesses);
                         setRevealedRows(saved.guesses.length);
@@ -367,7 +365,7 @@
             // Save state
             useEffect(() => {
                 if (mode === 'daily' && guesses.length > 0 && animatingRow === -1) {
-                    localStorage.setItem('abyssdleDaily_v2', JSON.stringify({
+                    localStorage.setItem('abyssdleDaily_v3', JSON.stringify({
                         dayIndex: getDailyTargetIndex(),
                         guesses,
                         gameStatus,
@@ -399,27 +397,23 @@
             const handleEnter = useCallback(() => {
                 if (gameStatus !== 'playing' || animatingRow !== -1) return;
                 
-                // 1. Validate Length
                 if (currentGuess.length !== targetLength) {
                     showMessage("Not enough letters");
                     triggerShake();
                     return;
                 }
 
-                // 2. Validate Word against Dictionary
                 if (!dictionary.has(currentGuess)) {
                     showMessage("Not in PokeAPI database");
                     triggerShake();
                     return;
                 }
 
-                // If valid, submit the guess
                 const newGuesses = [...guesses, currentGuess];
                 setGuesses(newGuesses);
                 setCurrentGuess('');
                 setAnimatingRow(newGuesses.length - 1);
 
-                // Wait for animation to finish
                 const animDuration = (targetLength * 150) + 600;
                 setTimeout(() => {
                     setRevealedRows(newGuesses.length);
@@ -440,7 +434,6 @@
                 }, animDuration);
             }, [currentGuess, targetLength, guesses, gameStatus, animatingRow, target.name, dictionary]);
 
-            // Global Keyboard Listener
             useEffect(() => {
                 const handleKeyDown = (e) => {
                     if (e.key === 'Enter') handleEnter();
@@ -451,7 +444,6 @@
                 return () => window.removeEventListener('keydown', handleKeyDown);
             }, [handleEnter, handleDelete, handleChar]);
 
-            // Calculate keyboard statuses
             const keyboardStatuses = useMemo(() => {
                 const statuses = {};
                 guesses.slice(0, revealedRows).forEach(g => {
@@ -673,7 +665,20 @@
                     
                     let selectedMeta;
                     if (mode === 'daily') {
-                        selectedMeta = db[getDailyTargetIndex() % db.length];
+                        const dayIdx = getDailyTargetIndex();
+                        
+                        // --- PRNG: Seeded Random Number Generator ---
+                        // Uses the day index as a seed so everyone gets the same 
+                        // completely randomized jump around the alphabet.
+                        let a = dayIdx + 8888; // Offset
+                        a |= 0;
+                        a = a + 0x6D2B79F5 | 0;
+                        let t = Math.imul(a ^ a >>> 15, 1 | a);
+                        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+                        let randomFloat = ((t ^ t >>> 14) >>> 0) / 4294967296;
+                        
+                        const randomIdx = Math.floor(randomFloat * db.length);
+                        selectedMeta = db[randomIdx];
                     } else {
                         selectedMeta = db[Math.floor(Math.random() * db.length)];
                     }
